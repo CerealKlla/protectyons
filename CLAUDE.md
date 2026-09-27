@@ -39,6 +39,8 @@ Scaffolded 2026-09-26 (see [context/decisions.md](context/decisions.md)):
 - **Deliberately narrow v1 scope**: only player-driven break/place is covered. Explosions, fire spread, fluid flow, sculk spread, and other non-player world changes are **not** addressed — flagged as a real, easy-to-extend gap, not silently dropped.
 - `./gradlew build`/`test` green (5 new `ProtectedRangeTest` cases). Boot-smoke-test and live in-game confirmation still pending.
 
-Next: boot-smoke-test the full four-mod (now five-mod) suite via `sync-mods.sh`, then a live `runClient` pass — place a settlement (Settlemynts), confirm digging/building inside its footprint is blocked at/above the surface band but caving underneath it still works, and confirm chopping trees/breaking crops/plants inside the same footprint is never blocked.
+**First live playtest, same day** (see [context/decisions.md](context/decisions.md)) — real bug found and fixed: tilling dirt/grass inside a protected settlement was incorrectly blocked. `BlockEvent.EntityPlaceEvent` turns out to also fire for in-place tool transformations (hoe-till, axe-strip/scrape/wax-off, shovel-path), not just genuine new placements — confirmed via temporary diagnostic logging after the user correctly pushed back that tilling doesn't create or destroy a solid block. Fixed generically via `VoxelProtectionListener#isInPlaceToolTransformation`, which checks the position's pre-change state (`event.getBlockSnapshot().getState()`) rather than enumerating tool abilities by name. `./gradlew build`/`test` green.
+
+Next: live re-confirmation of the tilling fix, plus the original test plan — place a settlement (Settlemynts), confirm digging/building inside its footprint is blocked at/above the surface band but caving underneath it still works, and confirm chopping trees/breaking crops/plants inside the same footprint is never blocked.
 
 See [context/classes/](context/classes/) for per-class reference.
