@@ -100,7 +100,7 @@ public final class VoxelProtectionListener {
             return false;
         }
 
-        int surfaceY = level.getHeight(Heightmap.Types.WORLD_SURFACE, pos.getX(), pos.getZ());
+        int surfaceY = findSolidSurfaceY(level, pos.getX(), pos.getZ());
         for (GeographicEntity entity : here) {
             if (entity.lifecycleState() != LifecycleState.REALIZED) {
                 continue;
@@ -110,5 +110,31 @@ public final class VoxelProtectionListener {
             }
         }
         return false;
+    }
+
+    /**
+     * The real ground surface at this column, ignoring trees/leaves/plants/snow entirely -- fixed
+     * 2026-09-26 (a real playtest bug, see decisions.md): {@code Heightmap.Types.WORLD_SURFACE}
+     * counts the top of whatever's tallest at a column, including a tree's leaves or trunk, so
+     * standing under a tree inside a settlement pushed the "surface" reading well above the real
+     * ground and over-protected empty air alongside it. Walks down from the heightmap's own top
+     * (a cheap starting point, not scanning from build height every time), skipping any block
+     * {@link ProtectionExemptBlocks#isExempt} already treats as non-solid, and returns the position
+     * just above the first genuinely solid block found -- the same "height" convention vanilla's
+     * own heightmaps use, so this drops in without changing {@link ProtectedRange}'s own math.
+     */
+    private int findSolidSurfaceY(ServerLevel level, int x, int z) {
+        int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+        int minY = level.getMinY();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        while (y > minY) {
+            cursor.set(x, y - 1, z);
+            var state = level.getBlockState(cursor);
+            if (!state.isAir() && !ProtectionExemptBlocks.isExempt(state)) {
+                return y;
+            }
+            y--;
+        }
+        return minY;
     }
 }
