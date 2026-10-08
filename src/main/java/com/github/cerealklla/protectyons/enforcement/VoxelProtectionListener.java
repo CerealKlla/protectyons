@@ -1,19 +1,23 @@
 package com.github.cerealklla.protectyons.enforcement;
 
 import java.util.Set;
+import java.util.UUID;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
 import com.github.cerealklla.cartographyr.geo.ProtectionLevel;
+import com.github.cerealklla.protectyons.permission.ProtectedAreaRegistry;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.EntityMobGriefingEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
+import net.neoforged.neoforge.event.level.ExplosionEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 
 /**
@@ -22,11 +26,13 @@ import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
  * itself never enforces {@code ProtectionLevel} (see that class's own Javadoc); this is the
  * concrete enforcement consumer.
  *
- * <p><b>Scope, deliberately narrow for v1</b>: only player-driven block break ({@link
- * BreakBlockEvent}) and player-driven block placement ({@link BlockEvent.EntityPlaceEvent},
- * filtered to {@link Player}) are covered. Explosions, fire spread, fluid flow, sculk spread, and
- * other non-player world changes are not addressed here -- easy to add later (e.g. {@code
- * ExplosionEvent.Detonate}) if it turns out to matter, but out of scope for the first pass.
+ * <p><b>Scope</b>: block break ({@link BreakBlockEvent}), block placement ({@link
+ * BlockEvent.EntityPlaceEvent}, any entity -- not just players, see {@link #onEntityPlace} below),
+ * explosion block destruction ({@link ExplosionEvent.Detonate}, e.g. creepers/TNT/beds-in-the-
+ * nether), and Enderman block theft ({@link EntityMobGriefingEvent}, see {@link #onMobGriefing})
+ * are all covered. Fire spread, fluid flow, sculk spread, and other non-player, non-explosion,
+ * non-Enderman world changes are still not addressed here -- easy to add later if it turns out to
+ * matter, but out of scope for now.
  *
  * <p><b>{@link BlockEvent.EntityPlaceEvent} also fires for in-place tool transformations</b>
  * (hoe-till, axe-strip/scrape/wax-off, shovel-path) -- confirmed via live diagnostic logging,
@@ -59,17 +65,14 @@ public final class VoxelProtectionListener {
         if (ProtectionExemptBlocks.isExempt(event.getState())) {
             return;
         }
-        if (isProtectedAt(serverLevel, event.getPos())) {
+        UUID actor = event.getPlayer() != null ? event.getPlayer().getUUID() : null;
+        if (isProtectedAt(serverLevel, event.getPos(), actor)) {
             event.setCanceled(true);
         }
     }
 
     @SubscribeEvent
     public void onEntityPlace(BlockEvent.EntityPlaceEvent event) {
-        Entity entity = event.getEntity();
-        if (!(entity instanceof Player)) {
-            return;
-        }
         if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -79,8 +82,58 @@ public final class VoxelProtectionListener {
         if (isInPlaceToolTransformation(event)) {
             return;
         }
-        if (isProtectedAt(serverLevel, event.getPos())) {
+        UUID actor = event.getEntity() instanceof Player player ? player.getUUID() : null;
+        if (isProtectedAt(serverLevel, event.getPos(), actor)) {
             event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent
+    public void onExplosionDetonate(ExplosionEvent.Detonate event) {
+        if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        event.getAffectedBlocks().removeIf(pos -> {
+            var state = serverLevel.getBlockState(pos);
+            if (ProtectionExemptBlocks.isExempt(state)) {
+                return false;
+            }
+            return isProtectedAt(serverLevel, pos, null);
+        });
+    }
+
+    /**
+     * Denies an Enderman's block-theft attempt (both stealing and placing back down) while it's
+     * standing inside a protected zone. Unlike break/place/explosion, block *pickup* has no
+     * cancelable {@code BlockEvent}-family hook at all -- {@code EndermanTakeBlockGoal} calls {@code
+     * level.removeBlock} directly (confirmed via decompiled 26.1.2 source), gated only by {@link
+     * EntityMobGriefingEvent} (checked in the goal's {@code canUse()}, which re-runs on almost every
+     * tick attempt since the goal only has a small random chance to fire each tick). Denying grief
+     * here is the closest thing to prevention available through public API -- deliberately chosen
+     * over reactively restoring a stolen block after the fact, which would still leave one real tick
+     * where the block is actually gone (able to trigger neighbor updates, falling sand/gravel, etc.
+     * before being patched back).
+     *
+     * <p>Approximate by construction: the check uses the Enderman's own current position, not the
+     * (randomized, up to 2 blocks away) target block position the goal picks internally each tick --
+     * that exact position isn't visible from this event. In practice this is a small edge case (an
+     * Enderman right at a settlement's boundary could steal a block just inside it, or be denied for
+     * one just outside), acceptable given settlements are typically much larger than a couple blocks.
+     * The place-back half doesn't share this approximation: {@link #onEntityPlace} above already
+     * covers it exactly, since {@code EndermanLeaveBlockGoal} places via {@link
+     * BlockEvent.EntityPlaceEvent} like anything else -- this handler is only strictly needed for the
+     * pickup half, but denying grief also short-circuits the place-back goal before it even starts.
+     */
+    @SubscribeEvent
+    public void onMobGriefing(EntityMobGriefingEvent event) {
+        if (!(event.getEntity() instanceof EnderMan enderman)) {
+            return;
+        }
+        if (!(enderman.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (isProtectedAt(serverLevel, enderman.blockPosition(), null)) {
+            event.setCanGrief(false);
         }
     }
 
@@ -94,7 +147,18 @@ public final class VoxelProtectionListener {
         return !previousState.isAir() && !ProtectionExemptBlocks.isExempt(previousState);
     }
 
-    private boolean isProtectedAt(ServerLevel level, BlockPos pos) {
+    /**
+     * @param actor the player attempting the change, or {@code null} for a non-player cause
+     *              (explosion, Enderman) -- if non-null and {@link ProtectedAreaRegistry} says this
+     *              player is permitted at this position (Settlemynts registers a Plot's Mayor, Town
+     *              Planners, and specific Owner this way -- 2026-09-29 design discussion), the area
+     *              is treated as unprotected for them regardless of its Cartographyr {@link
+     *              ProtectionLevel}.
+     */
+    private boolean isProtectedAt(ServerLevel level, BlockPos pos, UUID actor) {
+        if (ProtectedAreaRegistry.get(level.getServer()).isPermitted(pos.getX(), pos.getZ(), actor)) {
+            return false;
+        }
         Set<GeographicEntity> here = Cartography.getEntitiesAt(level, pos.getX(), pos.getZ());
         if (here.isEmpty()) {
             return false;
