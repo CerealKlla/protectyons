@@ -51,4 +51,20 @@ Next: live re-confirmation of the explosion fix, the Enderman fix, and both earl
 
 **Player-permission bypass added, 2026-09-29** (see [context/decisions.md](context/decisions.md), [context/classes/ProtectedAreaRegistry.md](context/classes/ProtectedAreaRegistry.md)) — found via a Blueprynts live bug report (a plot's own Mayor couldn't relocate a Building Supply Box inside their own plot, silently reverted by this mod's own enforcement) and a cross-mod design discussion confirming Cartographyr should stay permission-free. New `permission.ProtectedAreaRegistry` (a separate, `SavedData`-backed registry of area-polygon -> permitted-player-set, keyed by whatever id the registering mod already uses) plus public `api.Protectyons` facade (`registerProtectedArea`/`updatePermittedPlayers`/`unregisterProtectedArea`). `VoxelProtectionListener.isProtectedAt` now checks it first, exempting a permitted player entirely regardless of `ProtectionLevel`. Settlemynts is the first real caller (its own Plots, permitted = Mayor + Town Planners). `./gradlew build` green, **confirmed live, 2026-09-29** — the reported relocation now succeeds.
 
+**Baked terrain snapshot replaces the live ground-height scan, 2026-10-11** (see
+[context/decisions.md](context/decisions.md), [context/classes/ProtectedAreaRegistry.md](context/classes/ProtectedAreaRegistry.md)) —
+fixes the real, already-flagged open question from 2026-09-27: the `NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP`
+band used to be recomputed live off `Heightmap.Types.WORLD_SURFACE` on every check, so a tall building
+on a settlement pushed the band up to its own roof instead of staying at the real ground underneath.
+`SURFACE_BAND_BELOW_BLOCKS` widened 5 → 10. `permission.ProtectedAreaRegistry` now bakes a real
+per-column ground-height snapshot once, at settlement finalize (new
+`api.Protectyons#registerProtectedSettlementArea`), and `enforcement.VoxelProtectionListener` reads
+it instead of live-scanning (falling back to a live scan only if nothing was ever baked). A Mayor/
+Town Planner can still intentionally shift the baseline by reshaping genuinely natural terrain (new
+`enforcement.NaturalTerrainBlocks`) — building with a crafted material never does, regardless of
+height (an accepted limitation: a natural-tagged-block tower, e.g. plain stone, still shifts it).
+`./gradlew build`/`test` green (updated `ProtectedRangeTest` for the new depth), whole-suite
+`sync-mods.sh` + `runServer` boot-smoke-test clean (all 8 mods' common setup logged with no errors).
+**Not yet live-tested.**
+
 See [context/classes/](context/classes/) for per-class reference.

@@ -13,7 +13,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityMobGriefingEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -54,6 +53,15 @@ import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
  * is no longer an active place worth protecting (consistent with the general principle, flagged in
  * Cartographyr's own decisions.md 2026-09-26, that a position-query consumer must filter lifecycle
  * state itself since {@code getEntitiesAt} doesn't).
+ *
+ * <p><b>Surface band now reads a baked snapshot, not a live scan</b> (2026-10-11) -- {@link
+ * ProtectedAreaRegistry#getBakedHeight} is checked first, falling back to a live {@link
+ * TerrainHeightScanner#scanSurfaceY} only if nothing was ever baked for that column. This fixes a
+ * real bug: a live scan recalculates off whatever currently occupies a column, so a tall building
+ * used to push the protected band up to its own roof instead of staying at the real ground. A
+ * permitted actor's edit using a {@link NaturalTerrainBlocks#isNatural natural} block (not a crafted
+ * building material) shifts the baseline with them via {@link #shiftBakedHeight} -- see {@link
+ * ProtectedAreaRegistry}'s own doc for the full design.
  */
 public final class VoxelProtectionListener {
 
@@ -66,8 +74,14 @@ public final class VoxelProtectionListener {
             return;
         }
         UUID actor = event.getPlayer() != null ? event.getPlayer().getUUID() : null;
-        if (isProtectedAt(serverLevel, event.getPos(), actor)) {
+        BlockPos pos = event.getPos();
+        boolean permittedEdit = ProtectedAreaRegistry.get(serverLevel.getServer()).isPermitted(pos.getX(), pos.getZ(), actor);
+        if (!permittedEdit && isProtectedAt(serverLevel, pos, actor)) {
             event.setCanceled(true);
+            return;
+        }
+        if (permittedEdit && NaturalTerrainBlocks.isNatural(event.getState())) {
+            shiftBakedHeight(serverLevel, pos);
         }
     }
 
@@ -83,9 +97,26 @@ public final class VoxelProtectionListener {
             return;
         }
         UUID actor = event.getEntity() instanceof Player player ? player.getUUID() : null;
-        if (isProtectedAt(serverLevel, event.getPos(), actor)) {
+        BlockPos pos = event.getPos();
+        boolean permittedEdit = ProtectedAreaRegistry.get(serverLevel.getServer()).isPermitted(pos.getX(), pos.getZ(), actor);
+        if (!permittedEdit && isProtectedAt(serverLevel, pos, actor)) {
             event.setCanceled(true);
+            return;
         }
+        if (permittedEdit && NaturalTerrainBlocks.isNatural(event.getPlacedBlock())) {
+            shiftBakedHeight(serverLevel, pos);
+        }
+    }
+
+    /**
+     * Re-scans the column live and writes the result back into {@link ProtectedAreaRegistry}'s baked
+     * snapshot -- the auto-shift half of the 2026-10-11 fix. Only reached for a permitted actor's own
+     * natural-terrain edit (see the two handlers above), so this never fires for a non-permitted
+     * player (whose edit would already have been canceled) or for building with a non-natural block.
+     */
+    private void shiftBakedHeight(ServerLevel level, BlockPos pos) {
+        int newHeight = TerrainHeightScanner.scanSurfaceY(level, pos.getX(), pos.getZ());
+        ProtectedAreaRegistry.get(level.getServer()).updateColumnHeight(pos.getX(), pos.getZ(), newHeight);
     }
 
     @SubscribeEvent
@@ -164,7 +195,8 @@ public final class VoxelProtectionListener {
             return false;
         }
 
-        int surfaceY = findSolidSurfaceY(level, pos.getX(), pos.getZ());
+        Integer bakedSurfaceY = ProtectedAreaRegistry.get(level.getServer()).getBakedHeight(pos.getX(), pos.getZ());
+        int surfaceY = bakedSurfaceY != null ? bakedSurfaceY : TerrainHeightScanner.scanSurfaceY(level, pos.getX(), pos.getZ());
         for (GeographicEntity entity : here) {
             if (entity.lifecycleState() != LifecycleState.REALIZED) {
                 continue;
@@ -174,31 +206,5 @@ public final class VoxelProtectionListener {
             }
         }
         return false;
-    }
-
-    /**
-     * The real ground surface at this column, ignoring trees/leaves/plants/snow entirely -- fixed
-     * 2026-09-26 (a real playtest bug, see decisions.md): {@code Heightmap.Types.WORLD_SURFACE}
-     * counts the top of whatever's tallest at a column, including a tree's leaves or trunk, so
-     * standing under a tree inside a settlement pushed the "surface" reading well above the real
-     * ground and over-protected empty air alongside it. Walks down from the heightmap's own top
-     * (a cheap starting point, not scanning from build height every time), skipping any block
-     * {@link ProtectionExemptBlocks#isExempt} already treats as non-solid, and returns the position
-     * just above the first genuinely solid block found -- the same "height" convention vanilla's
-     * own heightmaps use, so this drops in without changing {@link ProtectedRange}'s own math.
-     */
-    private int findSolidSurfaceY(ServerLevel level, int x, int z) {
-        int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
-        int minY = level.getMinY();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        while (y > minY) {
-            cursor.set(x, y - 1, z);
-            var state = level.getBlockState(cursor);
-            if (!state.isAir() && !ProtectionExemptBlocks.isExempt(state)) {
-                return y;
-            }
-            y--;
-        }
-        return minY;
     }
 }

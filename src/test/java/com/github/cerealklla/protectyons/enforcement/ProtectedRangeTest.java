@@ -27,12 +27,12 @@ class ProtectedRangeTest {
     }
 
     @Test
-    void alongSurfaceAndUpProtectsFromFiveBelowSurfaceUpward() {
+    void alongSurfaceAndUpProtectsFromTenBelowSurfaceUpward() {
         ProtectionLevel level = ProtectionLevel.NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP;
         int surface = 70;
 
-        assertFalse(ProtectedRange.isProtected(level, surface, surface - 6));
-        assertTrue(ProtectedRange.isProtected(level, surface, surface - 5));
+        assertFalse(ProtectedRange.isProtected(level, surface, surface - 11));
+        assertTrue(ProtectedRange.isProtected(level, surface, surface - 10));
         assertTrue(ProtectedRange.isProtected(level, surface, surface));
         assertTrue(ProtectedRange.isProtected(level, surface, surface + 50));
     }

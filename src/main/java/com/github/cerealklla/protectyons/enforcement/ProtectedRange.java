@@ -20,10 +20,11 @@ public final class ProtectedRange {
 
     /**
      * How far below the surface {@link ProtectionLevel#NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP}'s
-     * protected band starts -- e.g. a surface at Y=70 protects Y=65 and up, leaving natural caves
-     * and underground mining below that untouched. Per the user's own spec: "surface layer - 5".
+     * protected band starts -- e.g. a surface at Y=70 protects Y=60 and up, leaving natural caves
+     * and underground mining below that untouched. Widened from 5 to 10 (2026-10-11) alongside the
+     * baked-terrain-snapshot fix -- see {@code permission.ProtectedAreaRegistry}'s own doc.
      */
-    public static final int SURFACE_BAND_BELOW_BLOCKS = 5;
+    public static final int SURFACE_BAND_BELOW_BLOCKS = 10;
 
     private ProtectedRange() {
     }
