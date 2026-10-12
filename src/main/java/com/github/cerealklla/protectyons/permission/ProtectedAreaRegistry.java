@@ -230,33 +230,11 @@ public final class ProtectedAreaRegistry extends SavedData {
         if (player == null) {
             return false;
         }
-        // TEMPORARY DEBUG (2026-10-12) -- real, easily-reproduced live report: a settlement's own
-        // Mayor still can't build inside it even after a full permission resync. Logging the real
-        // decision inputs instead of guessing again -- remove once the actual cause is found and
-        // confirmed fixed live.
-        boolean anyAreaContainsPos = false;
-        boolean anyAreaHasPlayer = false;
         for (Area area : areas.values()) {
-            boolean containsPos = area.area().contains(x, z);
-            boolean hasPlayer = area.permittedPlayers().contains(player);
-            if (containsPos) {
-                anyAreaContainsPos = true;
-            }
-            if (hasPlayer) {
-                anyAreaHasPlayer = true;
-            }
-            if (hasPlayer && containsPos) {
-                ProtectyonsMod.LOGGER.info("[PermDebug] isPermitted({}, {}, {}) -> TRUE via area {}", x, z, player, area.id());
+            if (area.permittedPlayers().contains(player) && area.area().contains(x, z)) {
                 return true;
             }
-            if (containsPos) {
-                ProtectyonsMod.LOGGER.info("[PermDebug] area {} contains ({}, {}) but its permittedPlayers={} does NOT include {}",
-                        area.id(), x, z, area.permittedPlayers(), player);
-            }
         }
-        ProtectyonsMod.LOGGER.info("[PermDebug] isPermitted({}, {}, {}) -> FALSE ({} total areas registered, "
-                        + "anyAreaContainsThisPos={}, anyAreaHasThisPlayer={})",
-                x, z, player, areas.size(), anyAreaContainsPos, anyAreaHasPlayer);
         return false;
     }
 }
