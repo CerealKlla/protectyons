@@ -76,7 +76,11 @@ public final class VoxelProtectionListener {
         UUID actor = event.getPlayer() != null ? event.getPlayer().getUUID() : null;
         BlockPos pos = event.getPos();
         boolean permittedEdit = ProtectedAreaRegistry.get(serverLevel.getServer()).isPermitted(pos.getX(), pos.getZ(), actor);
-        if (!permittedEdit && isProtectedAt(serverLevel, pos, actor)) {
+        boolean protectedHere = !permittedEdit && isProtectedAt(serverLevel, pos, actor);
+        // TEMPORARY DEBUG (2026-10-12) -- see ProtectedAreaRegistry#isPermitted's own doc.
+        com.github.cerealklla.protectyons.ProtectyonsMod.LOGGER.info(
+                "[PermDebug] onBreakBlock pos={} actor={} permittedEdit={} canceled={}", pos, actor, permittedEdit, protectedHere);
+        if (protectedHere) {
             event.setCanceled(true);
             return;
         }
@@ -99,7 +103,11 @@ public final class VoxelProtectionListener {
         UUID actor = event.getEntity() instanceof Player player ? player.getUUID() : null;
         BlockPos pos = event.getPos();
         boolean permittedEdit = ProtectedAreaRegistry.get(serverLevel.getServer()).isPermitted(pos.getX(), pos.getZ(), actor);
-        if (!permittedEdit && isProtectedAt(serverLevel, pos, actor)) {
+        boolean protectedHere = !permittedEdit && isProtectedAt(serverLevel, pos, actor);
+        // TEMPORARY DEBUG (2026-10-12) -- see ProtectedAreaRegistry#isPermitted's own doc.
+        com.github.cerealklla.protectyons.ProtectyonsMod.LOGGER.info(
+                "[PermDebug] onEntityPlace pos={} actor={} permittedEdit={} canceled={}", pos, actor, permittedEdit, protectedHere);
+        if (protectedHere) {
             event.setCanceled(true);
             return;
         }
@@ -191,17 +199,25 @@ public final class VoxelProtectionListener {
             return false;
         }
         Set<GeographicEntity> here = Cartography.getEntitiesAt(level, pos.getX(), pos.getZ());
+        // TEMPORARY DEBUG (2026-10-12) -- see ProtectedAreaRegistry#isPermitted's own doc.
+        com.github.cerealklla.protectyons.ProtectyonsMod.LOGGER.info(
+                "[PermDebug] isProtectedAt pos={} actor={} cartographyrEntitiesHere={}", pos, actor, here);
         if (here.isEmpty()) {
             return false;
         }
 
         Integer bakedSurfaceY = ProtectedAreaRegistry.get(level.getServer()).getBakedHeight(pos.getX(), pos.getZ());
         int surfaceY = bakedSurfaceY != null ? bakedSurfaceY : TerrainHeightScanner.scanSurfaceY(level, pos.getX(), pos.getZ());
+        com.github.cerealklla.protectyons.ProtectyonsMod.LOGGER.info(
+                "[PermDebug] isProtectedAt pos={} surfaceY={} (baked={})", pos, surfaceY, bakedSurfaceY);
         for (GeographicEntity entity : here) {
             if (entity.lifecycleState() != LifecycleState.REALIZED) {
                 continue;
             }
-            if (ProtectedRange.isProtected(entity.protectionLevel(), surfaceY, pos.getY())) {
+            boolean protects = ProtectedRange.isProtected(entity.protectionLevel(), surfaceY, pos.getY());
+            com.github.cerealklla.protectyons.ProtectyonsMod.LOGGER.info(
+                    "[PermDebug] isProtectedAt entity={} protectionLevel={} -> protects={}", entity.id(), entity.protectionLevel(), protects);
+            if (protects) {
                 return true;
             }
         }
