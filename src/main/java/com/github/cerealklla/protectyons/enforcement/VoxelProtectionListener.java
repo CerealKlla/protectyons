@@ -187,6 +187,13 @@ public final class VoxelProtectionListener {
      *              ProtectionLevel}.
      */
     private boolean isProtectedAt(ServerLevel level, BlockPos pos, UUID actor) {
+        // Checked FIRST and unconditionally -- a Highway tunnel segment (2026-10-13) has no
+        // permission-bypass concept at all, by design (immune to everyone, including a settlement's
+        // own Mayor), so it must never reach the ProtectedAreaRegistry exemption check below. See
+        // HighwayTunnelRegistry's own doc.
+        if (HighwayTunnelRegistry.get(level.getServer()).isWithinAnyTunnel(pos)) {
+            return true;
+        }
         if (ProtectedAreaRegistry.get(level.getServer()).isPermitted(pos.getX(), pos.getZ(), actor)) {
             return false;
         }

@@ -4,10 +4,12 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.cartographyr.geo.Geometry;
+import com.github.cerealklla.protectyons.enforcement.HighwayTunnelRegistry;
 import com.github.cerealklla.protectyons.permission.ProtectedAreaRegistry;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * The stable public entry point for other mods to register their own player-permission areas with
@@ -50,5 +52,21 @@ public final class Protectyons {
 
     public static void unregisterProtectedArea(MinecraftServer server, UUID areaId) {
         ProtectedAreaRegistry.get(server).unregister(areaId);
+    }
+
+    /**
+     * Registers a permanent, no-exemptions protected capsule around the 3D line from {@code start}
+     * to {@code end} -- added 2026-10-13 for Settlemynts' Highway tunnel protection. Deliberately
+     * separate from {@link #registerProtectedArea} -- see {@code enforcement.HighwayTunnelRegistry}'s
+     * own doc for why this doesn't go through the permission-exemption registry at all. {@code
+     * segmentId} is the caller's own id (Settlemynts reuses its Cartographyr road entity's own id),
+     * reused for {@link #unregisterHighwayTunnel}.
+     */
+    public static void registerHighwayTunnel(MinecraftServer server, long segmentId, Vec3 start, Vec3 end, double radiusBlocks) {
+        HighwayTunnelRegistry.get(server).register(segmentId, start, end, radiusBlocks);
+    }
+
+    public static void unregisterHighwayTunnel(MinecraftServer server, long segmentId) {
+        HighwayTunnelRegistry.get(server).unregister(segmentId);
     }
 }
